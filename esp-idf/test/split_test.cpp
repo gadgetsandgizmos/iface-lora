@@ -43,6 +43,8 @@ struct Receiver {
             half = data;
             seq  = f[0] & 0xF0;
             held = true;
+        } else if (!data.empty()) {
+            held = false;       /* a second half with no first: nothing to complete */
         }
     }
 };
@@ -106,11 +108,72 @@ static void testOtherSequenceReplaces()
     ck(r.got.size() == 1 && r.got[0] == bytes(301, 5), "the second packet arrives whole");
 }
 
+static void testFullFrameUnderHeldSequence()
+{
+    /* From a mixed sim: a receiver held a first half under header 0x51 and
+     * missed its second. Another sender's 259-byte packet came next under the
+     * same sequence nibble. Its first half completed the held one, 508 bytes
+     * nobody sent, and its 5-byte second half, c4 42 90 db 1f, was left with
+     * nothing to complete: that packet was lost as well. */
+    Bytes held = {0x51, 0x50, 0x00, 0x6d, 0x0d, 0xdb, 0x4c, 0x9c, 0x33};
+    held.resize(1 + RNODE_MAX_PAYLOAD, 0xa5);
+    Bytes next = {0x00, 0x01, 0xd3, 0x8b, 0x7a, 0xff, 0xe1, 0x8b};
+    next.resize(RNODE_MAX_PAYLOAD, 0x5a);
+    next.insert(next.end(), {0xc4, 0x42, 0x90, 0xdb, 0x1f});
+    std::vector<Bytes> f = frames(next, 5);
+    ck(f[1] == Bytes({0x51, 0xc4, 0x42, 0x90, 0xdb, 0x1f}), "the second half as it flew");
+    Receiver r;
+    r.push(held);
+    r.push(f[0]);
+    ck(r.got.empty(), "a full frame under the held sequence completes nothing");
+    r.push(f[1]);
+    ck(r.got.size() == 1 && r.got[0] == next, "it is a first half, and its packet arrives whole");
+}
+
+static void testLoneSecondHalf()
+{
+    /* From a mixed sim: a 259-byte link packet, sent as 254 + 5 bytes under
+     * header 0x21. A receiver lost the first half and held the 6-byte second
+     * frame as a first half. A relay forwarded the packet under the same
+     * sequence, and its first half completed the held one: a packet starting
+     * 0xb1 that nobody sent. */
+    Bytes orphan = {0x21, 0xb1, 0x95, 0xd7, 0x72, 0x7a};
+    Bytes relayed = {0x0c, 0x01, 0xa6, 0x3c, 0xdd, 0x9f, 0xf0, 0xed};
+    relayed.resize(RNODE_MAX_PAYLOAD, 0x5a);
+    relayed.insert(relayed.end(), orphan.begin() + 1, orphan.end());
+    std::vector<Bytes> f = frames(relayed, 2);
+    ck(f[1] == orphan, "the relay's second half is the orphan");
+    Receiver r;
+    r.push(orphan);
+    ck(r.got.empty() && !r.held, "a short split frame with no first half is dropped, not held");
+    r.push(f[0]);
+    r.push(f[1]);
+    ck(r.got.size() == 1 && r.got[0] == relayed, "the relayed copy arrives whole");
+}
+
+static void testHeaderOnlyFrame()
+{
+    /* Stock RNode firmware follows a packet of exactly 508 bytes with a split
+     * header and no bytes. No Reticulum packet is 508 bytes, so its two full
+     * frames are two first halves here, and the empty one is no half: the next
+     * packet under the same sequence is not cut short by it. */
+    Receiver r;
+    for (const Bytes& f : frames(bytes(2 * RNODE_MAX_PAYLOAD), 9)) r.push(f);
+    r.push(Bytes(1, (uint8_t)((9 << 4) | RNODE_FLAG_SPLIT)));
+    ck(r.got.empty(), "508 bytes and an empty frame deliver nothing");
+    Bytes next = bytes(300, 11);
+    for (const Bytes& f : frames(next, 9)) r.push(f);
+    ck(r.got.size() == 1 && r.got[0] == next, "the next packet arrives whole");
+}
+
 int main()
 {
     testEverySize();
     testUnsplitEndsHalf();
     testOtherSequenceReplaces();
+    testFullFrameUnderHeldSequence();
+    testLoneSecondHalf();
+    testHeaderOnlyFrame();
     if (failures) { printf("%d failure(s)\n", failures); return 1; }
     printf("split: ok\n");
     return 0;

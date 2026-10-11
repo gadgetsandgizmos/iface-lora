@@ -547,13 +547,35 @@ void bridgeFrameDeliver(LoraRadio* r, const uint8_t* frame, size_t pktLen) {
         r->splitPending = false;
         break;
     case SPLIT_FIRST:
-        /* A new split, or a different sender's: assembly (re)starts on it. */
+        /* A new split: assembly (re)starts on it. A half held ends here
+         * unfinished: its partner, sent back to back, would have come first.
+         * That holds under the held sequence too: a full frame is never a
+         * second half, so this one is another packet's first. */
+        if (r->splitPending) {
+            r->splitTimeouts++;
+            if (logIsVerbose(TAG) && r->splitSeq == (header & 0xF0))
+                verb("lora/%d split: a first half under the held sequence "
+                     "replaces it", r->idx);
+        }
         std::memcpy(r->splitBuf, frame + 1, payloadLen);
         r->splitLen      = payloadLen;
         r->splitSeq      = header & 0xF0;
         r->splitPending  = true;
         r->splitDeadline = xTaskGetTickCount() + pdMS_TO_TICKS(SPLIT_RX_TIMEOUT_MS);
         splitHoldFromNow();
+        break;
+    case SPLIT_LONE:
+        /* Its first half was not heard, so there is nothing to complete. */
+        if (r->splitPending) {
+            r->splitPending = false;
+            r->splitTimeouts++;
+        }
+        r->splitTimeouts++;
+        if (logIsVerbose(TAG))
+            verb("lora/%d split: a second half (%uB) with no first half, "
+                 "dropped", r->idx, (unsigned)payloadLen);
+        break;
+    case SPLIT_EMPTY:
         break;
     }
 
