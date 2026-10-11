@@ -1,7 +1,7 @@
 #pragma once
 /**
- * lora_split — the on-air split framing's receive rule: what one received
- * Reticulum frame does to the first half held.
+ * lora_split — the on-air split framing's receive rules: which received frames
+ * are its, and what one does to the first half held.
  *
  * Every Reticulum frame on this interface starts with one header byte: a
  * random sequence in the high nibble, SPLIT in bit 0. A packet longer than
@@ -9,14 +9,37 @@
  * first RNODE_MAX_PAYLOAD bytes, then the rest.
  *
  * Free of ESP-IDF, RadioLib and FreeRTOS, like supe.h, so the host tests reach
- * it (test/split_test.cpp). Delivery (lora_bridge.cpp) and the LoRaMon record
- * (lora_mon.cpp) both answer by it and keep their own state.
+ * it (test/split_test.cpp, built with SUPE and without). Delivery
+ * (lora_bridge.cpp) and the LoRaMon record (lora_mon.cpp) both answer by it
+ * and keep their own state.
  */
 #include <stddef.h>
 #include <stdint.h>
+#if !defined(CONFIG_LORA_NO_SUPE)
+#include "supe.h"
+#endif
 
 #define RNODE_MAX_PAYLOAD    254
 #define RNODE_FLAG_SPLIT     0x01
+
+/* What byte 0 makes of a received frame that nothing sorted out before it (a
+ * power request, a short path request). The split header can be any byte whose
+ * low nibble is 0 or 1 and no other, and SUPE's type bytes concede those values
+ * (supe.h). A build without SUPE sorts by the same rule less SUPE's share:
+ * there a SUPE frame is somebody else's. */
+enum RxSort : uint8_t {
+    SORT_RNS,       /* a split header: a Reticulum frame */
+    SORT_SUPE,      /* a SUPE frame, in a build with SUPE */
+    SORT_FOREIGN,   /* anything else: somebody else's, discarded */
+};
+
+static inline RxSort rxSort(uint8_t byte0) {
+    if ((byte0 & 0x0F) <= RNODE_FLAG_SPLIT) return SORT_RNS;
+#if !defined(CONFIG_LORA_NO_SUPE)
+    if (supeIsTypeByte(byte0)) return SORT_SUPE;
+#endif
+    return SORT_FOREIGN;
+}
 
 enum SplitStep : uint8_t {
     SPLIT_WHOLE,    /* not split: a packet alone; a half held ends unfinished */

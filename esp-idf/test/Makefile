@@ -25,8 +25,12 @@ supe_engine_test: supe_engine_test.cpp ../src/supe.cpp ../src/supe_engine.cpp \
 rfcal_test: rfcal_test.cpp ../src/lora_rfcal.cpp ../src/lora_rfcal.h
 	$(CXX) $(CXXFLAGS) -o $@ rfcal_test.cpp ../src/lora_rfcal.cpp
 
-split_test: split_test.cpp ../src/lora_split.h
+split_test: split_test.cpp ../src/lora_split.h ../src/supe.h
 	$(CXX) $(CXXFLAGS) -o $@ split_test.cpp
+
+# The same test as a build without SUPE sees it, where supe.h is not there.
+split_nosupe_test: split_test.cpp ../src/lora_split.h
+	$(CXX) $(CXXFLAGS) -DCONFIG_LORA_NO_SUPE -o $@ split_test.cpp
 
 run: supe_core_test
 	./supe_core_test golden.txt supe-rate-table-vectors.txt
@@ -37,10 +41,11 @@ engine: supe_engine_test
 rfcal: rfcal_test
 	./rfcal_test
 
-split: split_test
+split: split_test split_nosupe_test
 	./split_test
+	./split_nosupe_test
 
 clean:
-	rm -f supe_core_test supe_engine_test rfcal_test split_test
+	rm -f supe_core_test supe_engine_test rfcal_test split_test split_nosupe_test
 
 .PHONY: all run engine rfcal split clean

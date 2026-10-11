@@ -1,10 +1,13 @@
-/* split_test — the split framing's receive rule (src/lora_split.h), on the host.
+/* split_test — the split framing's receive rules (src/lora_split.h), on the host,
+ * built twice: with SUPE and without (CONFIG_LORA_NO_SUPE).
  *
- * A small receiver stands in for delivery (lora_bridge.cpp, bridgeFrameDeliver):
- * it holds a first half, acts on each splitStep answer as delivery does, and
- * keeps what would reach rnsd. Frames are built the way this interface sends
- * them: a packet up to RNODE_MAX_PAYLOAD bytes in one frame, a longer one as
- * its first RNODE_MAX_PAYLOAD bytes and then the rest, under one sequence. */
+ * A small receiver stands in for the dispatch and delivery (lora_bridge.cpp,
+ * handleRxDone and bridgeFrameDeliver): it takes only what rxSort calls a
+ * Reticulum frame, holds a first half, acts on each splitStep answer as
+ * delivery does, and keeps what would reach rnsd. Frames are built the way
+ * this interface sends them: a packet up to RNODE_MAX_PAYLOAD bytes in one
+ * frame, a longer one as its first RNODE_MAX_PAYLOAD bytes and then the rest,
+ * under one sequence. */
 
 #include "../src/lora_split.h"
 
@@ -30,6 +33,7 @@ struct Receiver {
 
     void push(const Bytes& f)
     {
+        if (rxSort(f[0]) != SORT_RNS) return;   /* SUPE's, or somebody else's */
         Bytes data(f.begin() + 1, f.end());
         SplitStep step = splitStep(held, seq, f[0], data.size());
         if (step == SPLIT_WHOLE) {
@@ -166,15 +170,45 @@ static void testHeaderOnlyFrame()
     ck(r.got.size() == 1 && r.got[0] == next, "the next packet arrives whole");
 }
 
+static void testSort()
+{
+    /* Byte 0 of every frame this interface sends with a packet in it, as
+     * frames() builds them: a Reticulum frame's, with SUPE built in or not.
+     * SUPE's type bytes are 0xC0-0xDF less the four a header can be (supe.h):
+     * SUPE's where it is built in, somebody else's where not. Every other byte
+     * is somebody else's. */
+    bool header[256] = {};
+    for (unsigned seq = 0; seq < 16; seq++) {
+        header[seq << 4] = true;
+        header[(seq << 4) | RNODE_FLAG_SPLIT] = true;
+    }
+    int rns = 0, other = 0;
+    for (unsigned b = 0; b < 256; b++) {
+        RxSort want = header[b] ? SORT_RNS : SORT_FOREIGN;
+#if !defined(CONFIG_LORA_NO_SUPE)
+        if (!header[b] && b >= 0xC0 && b <= 0xDF) want = SORT_SUPE;
+#endif
+        if (rxSort((uint8_t)b) != want) (header[b] ? rns : other)++;
+    }
+    ck(rns == 0, "every split header begins a Reticulum frame");
+    ck(other == 0, "and every other byte is SUPE's or somebody else's");
+}
+
 int main()
 {
+    testSort();
     testEverySize();
     testUnsplitEndsHalf();
     testOtherSequenceReplaces();
     testFullFrameUnderHeldSequence();
     testLoneSecondHalf();
     testHeaderOnlyFrame();
-    if (failures) { printf("%d failure(s)\n", failures); return 1; }
-    printf("split: ok\n");
+#if defined(CONFIG_LORA_NO_SUPE)
+    const char* build = " (no SUPE)";
+#else
+    const char* build = "";
+#endif
+    if (failures) { printf("split%s: %d failure(s)\n", build, failures); return 1; }
+    printf("split%s: ok\n", build);
     return 0;
 }

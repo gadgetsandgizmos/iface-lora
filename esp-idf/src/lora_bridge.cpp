@@ -363,7 +363,7 @@ static void handleRxDone(LoraRadio* r) {
      * interface the first on-air byte is the split header — a random 4-bit
      * sequence in the high nibble and a split flag in bit 0 — which reaches
      * every byte whose low nibble is 0 or 1 and nothing else. So byte 0 sorts
-     * into exactly three cases:
+     * into exactly three cases (rxSort, lora_split.h):
      *
      *   low nibble 0 or 1                      → a split header: a Reticulum packet
      *   0xC2–0xDF, low nibble neither          → a SUPE frame
@@ -378,7 +378,8 @@ static void handleRxDone(LoraRadio* r) {
      * to the detour); the record of THIS frame belongs to the channel it
      * arrived on, so that is captured first. */
     uint8_t rxCh = r->chNow;
-    bool foreign = false;
+    const RxSort sort = rxSort(header);
+    bool foreign = !ours && sort == SORT_FOREIGN;
     /* And whether this frame belongs to a meeting of ours — captured here for
      * the same reason, because the frame that CLOSES a meeting ends it, and a
      * record asking afterwards would call the closing frame somebody else's.
@@ -388,19 +389,11 @@ static void handleRxDone(LoraRadio* r) {
 #if !defined(CONFIG_LORA_NO_SUPE)
     uint8_t meetTag[SUPE_TAG_LEN];
     inMeeting = supeMeetingTag(r, meetTag);
-    if (!ours && !supeIsFramingByte(header)) {
-        if (supeIsTypeByte(header)) {
-            supeOnFrame(r, frame, pktLen, (int16_t)lround(r->rssiLast),
-                        (int16_t)lround(r->snrLast * 10.0));
-            ours = true;
-        } else {
-            foreign = true;
-        }
+    if (!ours && sort == SORT_SUPE) {
+        supeOnFrame(r, frame, pktLen, (int16_t)lround(r->rssiLast),
+                    (int16_t)lround(r->snrLast * 10.0));
+        ours = true;
     }
-#else
-    /* Nothing on the air is ours but Reticulum: anything else is somebody
-     * else's traffic, counted and left alone. */
-    if (!ours) foreign = true;
 #endif
 
     /* Record this on-air frame (RX_DONE marks end-of-air, so start = end − ToA),
