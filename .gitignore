@@ -48,3 +48,4 @@ esp-idf/build/
 esp-idf/test/supe_core_test
 esp-idf/test/supe_engine_test
 esp-idf/test/rfcal_test
+esp-idf/test/split_test

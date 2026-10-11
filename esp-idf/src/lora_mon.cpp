@@ -915,7 +915,7 @@ void loraMonClassify(LoraRadio* r, uint8_t dir, const uint8_t* f, size_t len,
     bool split = type != LORA_PKT_OURS && len >= 1 && (f[0] & RNODE_FLAG_SPLIT);
     /* A head whose tail never came does not get to claim the next one. */
     if (ms->pend && (uint32_t)(now - ms->atMs) > SPLIT_RX_TIMEOUT_MS) ms->pend = false;
-    if (split && ms->pend && ms->seq == (uint8_t)(f[0] & 0xF0)) {
+    if (split && splitStep(ms->pend, ms->seq, f[0], len - 1) == SPLIT_SECOND) {
         *desc  = LMD_RNS_SPLIT;             /* what this FRAME is: the rest of one */
         *whole = ms->desc;                  /* what the PACKET is: its head's answer */
         memcpy(tag, ms->tag, 3);

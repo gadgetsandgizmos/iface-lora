@@ -1,17 +1,17 @@
-# Host-side tests for SUPE's pure core.
+# Host-side tests for SUPE's pure core, the RF calibration and the split framing.
 #
 #   make          build, run, and regenerate golden.txt
 #   make clean
 #
-# No ESP-IDF, no RadioLib, no FreeRTOS: src/supe.{h,cpp} and src/lora_rfcal.{h,cpp}
-# are deliberately free of all three so they can be tested here. If this build
-# starts needing an IDF header, something has leaked into a core and belongs in
-# lora.cpp or lora_fem.cpp instead.
+# No ESP-IDF, no RadioLib, no FreeRTOS: src/supe.{h,cpp}, src/lora_rfcal.{h,cpp}
+# and src/lora_split.h are deliberately free of all three so they can be tested
+# here. If this build starts needing an IDF header, something has leaked into a
+# core and belongs in lora.cpp or lora_fem.cpp instead.
 
 CXX      ?= g++
 CXXFLAGS ?= -std=c++17 -Wall -Wextra -Werror -O1 -g
 
-all: run engine rfcal
+all: run engine rfcal split
 
 supe_core_test: supe_core_test.cpp ../src/supe.cpp ../src/supe.h
 	$(CXX) $(CXXFLAGS) -o $@ supe_core_test.cpp ../src/supe.cpp -lm
@@ -25,6 +25,9 @@ supe_engine_test: supe_engine_test.cpp ../src/supe.cpp ../src/supe_engine.cpp \
 rfcal_test: rfcal_test.cpp ../src/lora_rfcal.cpp ../src/lora_rfcal.h
 	$(CXX) $(CXXFLAGS) -o $@ rfcal_test.cpp ../src/lora_rfcal.cpp
 
+split_test: split_test.cpp ../src/lora_split.h
+	$(CXX) $(CXXFLAGS) -o $@ split_test.cpp
+
 run: supe_core_test
 	./supe_core_test golden.txt supe-rate-table-vectors.txt
 
@@ -34,7 +37,10 @@ engine: supe_engine_test
 rfcal: rfcal_test
 	./rfcal_test
 
-clean:
-	rm -f supe_core_test supe_engine_test rfcal_test
+split: split_test
+	./split_test
 
-.PHONY: all run engine rfcal clean
+clean:
+	rm -f supe_core_test supe_engine_test rfcal_test split_test
+
+.PHONY: all run engine rfcal split clean

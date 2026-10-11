@@ -511,8 +511,6 @@ static void handleRxDone(LoraRadio* r) {
  * Shared by the live path above and the meeting buffer's replay at close. */
 void bridgeFrameDeliver(LoraRadio* r, const uint8_t* frame, size_t pktLen) {
     uint8_t  header     = frame[0];
-    uint8_t  seq        = header & 0xF0;
-    bool     isSplit    = (header & RNODE_FLAG_SPLIT) != 0;
     size_t   payloadLen = pktLen - 1;
 
     /* The partner of a first half follows it back to back: its preamble is
@@ -523,7 +521,8 @@ void bridgeFrameDeliver(LoraRadio* r, const uint8_t* frame, size_t pktLen) {
         r->splitHoldUntil = xTaskGetTickCount() + pdMS_TO_TICKS(ms);
     };
 
-    if (!isSplit) {
+    switch (splitStep(r->splitPending, r->splitSeq, header, payloadLen)) {
+    case SPLIT_WHOLE: {
         /* A frame that is not a split half ends any split in progress: its
          * partner is not coming, whoever sent it. */
         if (r->splitPending) {
@@ -533,14 +532,9 @@ void bridgeFrameDeliver(LoraRadio* r, const uint8_t* frame, size_t pktLen) {
         size_t fl = pktLen;                        /* whole on-air frame (incl. header) */
         deliverInbound(r, frame + 1, payloadLen, loraPacketAirtimeMs(r, &fl, 1), 1);
         r->rxBytes += payloadLen;
-    } else if (!r->splitPending) {
-        std::memcpy(r->splitBuf, frame + 1, payloadLen);
-        r->splitLen      = payloadLen;
-        r->splitSeq      = seq;
-        r->splitPending  = true;
-        r->splitDeadline = xTaskGetTickCount() + pdMS_TO_TICKS(SPLIT_RX_TIMEOUT_MS);
-        splitHoldFromNow();
-    } else if (r->splitSeq == seq) {
+        break;
+    }
+    case SPLIT_SECOND:
         if (r->splitLen + payloadLen <= sizeof(r->splitBuf)) {
             /* Two on-air frames, each with its own preamble/header/CRC. */
             size_t fl[2] = { r->splitLen + 1, payloadLen + 1 };
@@ -551,13 +545,16 @@ void bridgeFrameDeliver(LoraRadio* r, const uint8_t* frame, size_t pktLen) {
             r->rxBytes += r->splitLen;
         }
         r->splitPending = false;
-    } else {
-        /* Different sender's split — restart assembly on the new seq. */
+        break;
+    case SPLIT_FIRST:
+        /* A new split, or a different sender's: assembly (re)starts on it. */
         std::memcpy(r->splitBuf, frame + 1, payloadLen);
         r->splitLen      = payloadLen;
-        r->splitSeq      = seq;
+        r->splitSeq      = header & 0xF0;
+        r->splitPending  = true;
         r->splitDeadline = xTaskGetTickCount() + pdMS_TO_TICKS(SPLIT_RX_TIMEOUT_MS);
         splitHoldFromNow();
+        break;
     }
 
     /* A pending power request binds to the one RNS frame that follows it and to
