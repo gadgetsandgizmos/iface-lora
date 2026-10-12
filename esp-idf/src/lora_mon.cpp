@@ -402,6 +402,8 @@ void publishStats(LoraRadio* r) {
     storageSet(rk(b, sizeof b, r->idx, "stats.tx_frames"), (int)(r->txFrames & 0x7fffffff));
     storageSet(rk(b, sizeof b, r->idx, "stats.rx_frames"), (int)(r->rxFrames & 0x7fffffff));
     storageSet(rk(b, sizeof b, r->idx, "stats.crc_err"),   (int)(r->crcErr & 0x7fffffff));
+    /* Split halves that never became a packet: a first half whose partner did
+     * not come, in time or before another frame, and a second half with none. */
     storageSet(rk(b, sizeof b, r->idx, "stats.split_rx_timeout"), (int)(r->splitTimeouts & 0x7fffffff));
     storageSet(rk(b, sizeof b, r->idx, "stats.tx_dropped"), (int)(r->txDropped & 0x7fffffff));
     storageSet(rk(b, sizeof b, r->idx, "stats.rssi_last"), (int)r->rssiLast);
@@ -895,9 +897,10 @@ bool loraMonIsProof(uint8_t desc) {
  * the half that HAS one. Nothing in a frame says which half it is, and the
  * reassembly state cannot answer either — a train's frames are buffered by the
  * meeting and reassembled at its close, so at record time none of it has moved.
- * The stream tracks itself instead, by the seq-and-timeout rule reassembly uses:
- * a split frame whose seq matches a pending head is that head's tail, and takes
- * the head's answers rather than inventing its own out of payload bytes.
+ * The stream tracks itself instead, by the rule reassembly uses (splitStep) and
+ * its timeout: a short split frame whose seq matches a pending head is that
+ * head's tail, and takes the head's answers rather than inventing its own out of
+ * payload bytes. A full one is a head of its own.
  *
  * Two descriptions come back because they answer different questions. `desc` is
  * what this FRAME is, and a tail is honestly a `split`. `whole` is what the
@@ -915,7 +918,7 @@ void loraMonClassify(LoraRadio* r, uint8_t dir, const uint8_t* f, size_t len,
     bool split = type != LORA_PKT_OURS && len >= 1 && (f[0] & RNODE_FLAG_SPLIT);
     /* A head whose tail never came does not get to claim the next one. */
     if (ms->pend && (uint32_t)(now - ms->atMs) > SPLIT_RX_TIMEOUT_MS) ms->pend = false;
-    if (split && ms->pend && ms->seq == (uint8_t)(f[0] & 0xF0)) {
+    if (split && splitStep(ms->pend, ms->seq, f[0], len - 1) == SPLIT_SECOND) {
         *desc  = LMD_RNS_SPLIT;             /* what this FRAME is: the rest of one */
         *whole = ms->desc;                  /* what the PACKET is: its head's answer */
         memcpy(tag, ms->tag, 3);

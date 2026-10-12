@@ -363,7 +363,7 @@ static void handleRxDone(LoraRadio* r) {
      * interface the first on-air byte is the split header — a random 4-bit
      * sequence in the high nibble and a split flag in bit 0 — which reaches
      * every byte whose low nibble is 0 or 1 and nothing else. So byte 0 sorts
-     * into exactly three cases:
+     * into exactly three cases (rxSort, lora_split.h):
      *
      *   low nibble 0 or 1                      → a split header: a Reticulum packet
      *   0xC2–0xDF, low nibble neither          → a SUPE frame
@@ -378,7 +378,8 @@ static void handleRxDone(LoraRadio* r) {
      * to the detour); the record of THIS frame belongs to the channel it
      * arrived on, so that is captured first. */
     uint8_t rxCh = r->chNow;
-    bool foreign = false;
+    const RxSort sort = rxSort(header);
+    bool foreign = !ours && sort == SORT_FOREIGN;
     /* And whether this frame belongs to a meeting of ours — captured here for
      * the same reason, because the frame that CLOSES a meeting ends it, and a
      * record asking afterwards would call the closing frame somebody else's.
@@ -388,19 +389,11 @@ static void handleRxDone(LoraRadio* r) {
 #if !defined(CONFIG_LORA_NO_SUPE)
     uint8_t meetTag[SUPE_TAG_LEN];
     inMeeting = supeMeetingTag(r, meetTag);
-    if (!ours && !supeIsFramingByte(header)) {
-        if (supeIsTypeByte(header)) {
-            supeOnFrame(r, frame, pktLen, (int16_t)lround(r->rssiLast),
-                        (int16_t)lround(r->snrLast * 10.0));
-            ours = true;
-        } else {
-            foreign = true;
-        }
+    if (!ours && sort == SORT_SUPE) {
+        supeOnFrame(r, frame, pktLen, (int16_t)lround(r->rssiLast),
+                    (int16_t)lround(r->snrLast * 10.0));
+        ours = true;
     }
-#else
-    /* Nothing on the air is ours but Reticulum: anything else is somebody
-     * else's traffic, counted and left alone. */
-    if (!ours) foreign = true;
 #endif
 
     /* Record this on-air frame (RX_DONE marks end-of-air, so start = end − ToA),
@@ -511,8 +504,6 @@ static void handleRxDone(LoraRadio* r) {
  * Shared by the live path above and the meeting buffer's replay at close. */
 void bridgeFrameDeliver(LoraRadio* r, const uint8_t* frame, size_t pktLen) {
     uint8_t  header     = frame[0];
-    uint8_t  seq        = header & 0xF0;
-    bool     isSplit    = (header & RNODE_FLAG_SPLIT) != 0;
     size_t   payloadLen = pktLen - 1;
 
     /* The partner of a first half follows it back to back: its preamble is
@@ -523,7 +514,8 @@ void bridgeFrameDeliver(LoraRadio* r, const uint8_t* frame, size_t pktLen) {
         r->splitHoldUntil = xTaskGetTickCount() + pdMS_TO_TICKS(ms);
     };
 
-    if (!isSplit) {
+    switch (splitStep(r->splitPending, r->splitSeq, header, payloadLen)) {
+    case SPLIT_WHOLE: {
         /* A frame that is not a split half ends any split in progress: its
          * partner is not coming, whoever sent it. */
         if (r->splitPending) {
@@ -533,14 +525,9 @@ void bridgeFrameDeliver(LoraRadio* r, const uint8_t* frame, size_t pktLen) {
         size_t fl = pktLen;                        /* whole on-air frame (incl. header) */
         deliverInbound(r, frame + 1, payloadLen, loraPacketAirtimeMs(r, &fl, 1), 1);
         r->rxBytes += payloadLen;
-    } else if (!r->splitPending) {
-        std::memcpy(r->splitBuf, frame + 1, payloadLen);
-        r->splitLen      = payloadLen;
-        r->splitSeq      = seq;
-        r->splitPending  = true;
-        r->splitDeadline = xTaskGetTickCount() + pdMS_TO_TICKS(SPLIT_RX_TIMEOUT_MS);
-        splitHoldFromNow();
-    } else if (r->splitSeq == seq) {
+        break;
+    }
+    case SPLIT_SECOND:
         if (r->splitLen + payloadLen <= sizeof(r->splitBuf)) {
             /* Two on-air frames, each with its own preamble/header/CRC. */
             size_t fl[2] = { r->splitLen + 1, payloadLen + 1 };
@@ -551,13 +538,38 @@ void bridgeFrameDeliver(LoraRadio* r, const uint8_t* frame, size_t pktLen) {
             r->rxBytes += r->splitLen;
         }
         r->splitPending = false;
-    } else {
-        /* Different sender's split — restart assembly on the new seq. */
+        break;
+    case SPLIT_FIRST:
+        /* A new split: assembly (re)starts on it. A half held ends here
+         * unfinished: its partner, sent back to back, would have come first.
+         * That holds under the held sequence too: a full frame is never a
+         * second half, so this one is another packet's first. */
+        if (r->splitPending) {
+            r->splitTimeouts++;
+            if (logIsVerbose(TAG) && r->splitSeq == (header & 0xF0))
+                verb("lora/%d split: a first half under the held sequence "
+                     "replaces it", r->idx);
+        }
         std::memcpy(r->splitBuf, frame + 1, payloadLen);
         r->splitLen      = payloadLen;
-        r->splitSeq      = seq;
+        r->splitSeq      = header & 0xF0;
+        r->splitPending  = true;
         r->splitDeadline = xTaskGetTickCount() + pdMS_TO_TICKS(SPLIT_RX_TIMEOUT_MS);
         splitHoldFromNow();
+        break;
+    case SPLIT_LONE:
+        /* Its first half was not heard, so there is nothing to complete. */
+        if (r->splitPending) {
+            r->splitPending = false;
+            r->splitTimeouts++;
+        }
+        r->splitTimeouts++;
+        if (logIsVerbose(TAG))
+            verb("lora/%d split: a second half (%uB) with no first half, "
+                 "dropped", r->idx, (unsigned)payloadLen);
+        break;
+    case SPLIT_EMPTY:
+        break;
     }
 
     /* A pending power request binds to the one RNS frame that follows it and to

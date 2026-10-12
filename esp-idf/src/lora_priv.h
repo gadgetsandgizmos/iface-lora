@@ -63,8 +63,7 @@
 
 #define LORA_VERSION         10
 #define RNS_MTU              500
-#define RNODE_MAX_PAYLOAD    254
-#define RNODE_FLAG_SPLIT     0x01
+#include "lora_split.h"   /* RNODE_MAX_PAYLOAD, RNODE_FLAG_SPLIT and the receive rule */
 #define SPLIT_RX_TIMEOUT_MS  5000
 #define SPLIT_FLIP_MS        30     /* sender's gap between halves, with margin */
 #define HAIL_AIR_BINS        60     /* one-minute bins: an hour */
