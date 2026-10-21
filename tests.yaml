@@ -9,7 +9,7 @@ tests:
 
   - id: rnode-endpoint
     type: hil
-    tier: nightly
+    tier: extended
     run: python3 esp-idf/test/rnode_test.py
     tools: [python3, docker]
     configs: [reticulous/reticulous:no-supe]
