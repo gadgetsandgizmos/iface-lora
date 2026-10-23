@@ -524,6 +524,19 @@ static bool radioStart(LoraRadio* r) {
      * table, which survives a config cycle, so turning the key back on resumes
      * with what was measured rather than re-probing the mesh. */
 
+    /* IFAC: network_name is config (s.), passphrase is a secret (secrets.).
+     * Either one puts the interface on an access-coded network; the size is
+     * only the access-code length, unset meaning upstream RNodeInterface's. */
+    storageGetStr(sk(kb, sizeof kb, r->idx, "ifac_netname"), r->curIfacNetname, sizeof(r->curIfacNetname), "");
+    {
+        char skb[48];
+        snprintf(skb, sizeof skb, "s.lora.%d.ifac_netkey", r->idx);
+        storageGetStr(skb, r->curIfacNetkey, sizeof(r->curIfacNetkey), "");
+    }
+    r->curIfacOn   = r->curIfacNetname[0] || r->curIfacNetkey[0];
+    r->curIfacSize = (uint8_t)storageGetInt(sk(kb, sizeof kb, r->idx, "ifac_size"), 0);
+    if (!r->curIfacSize) r->curIfacSize = RNS_IFAC_SIZE_SERIAL;
+
 #if !defined(CONFIG_LORA_NO_SUPE)
     /* ── SUPE ──
      * The regime is `afa` above; these are the rest. The access-code gate is
@@ -545,7 +558,7 @@ static bool radioStart(LoraRadio* r) {
     r->supeNameSender = storageGetInt(
         sk(kb, sizeof kb, r->idx, "SUPE.sender_ident"), 1) != 0;
     bool supeWanted = storageGetInt(sk(kb, sizeof kb, r->idx, "SUPE.enable"), 0) != 0;
-    bool haveIfac   = storageGetInt(sk(kb, sizeof kb, r->idx, "ifac_size"), 0) != 0;
+    bool haveIfac   = r->curIfacOn;
     /* Two different questions. An access code or an expired dialect means the
      * machinery cannot run at all; the enable key means it runs but does not
      * SPEAK — it still reads announcements, so the picture of the neighbourhood
@@ -572,14 +585,6 @@ static bool radioStart(LoraRadio* r) {
     annInit(r);
     peersInit(r);
 
-    /* IFAC: network_name is config (s.), passphrase is a secret (secrets.). */
-    storageGetStr(sk(kb, sizeof kb, r->idx, "ifac_netname"), r->curIfacNetname, sizeof(r->curIfacNetname), "");
-    {
-        char skb[48];
-        snprintf(skb, sizeof skb, "s.lora.%d.ifac_netkey", r->idx);
-        storageGetStr(skb, r->curIfacNetkey, sizeof(r->curIfacNetkey), "");
-    }
-    r->curIfacSize = (uint8_t)storageGetInt(sk(kb, sizeof kb, r->idx, "ifac_size"), 0);
     r->curAnnounceCap = (uint8_t)storageGetInt(sk(kb, sizeof kb, r->idx, "announce_cap"), RNS_IFACE_ANNOUNCE_CAP_DEFAULT);
     r->curAnnounceCapPermille = (uint16_t)storageGetInt(sk(kb, sizeof kb, r->idx, "announce_cap_permille"), 0);
     r->curPathAnswerSpread = (uint8_t)storageGetInt(sk(kb, sizeof kb, r->idx, "path_answer_spread"), 0);

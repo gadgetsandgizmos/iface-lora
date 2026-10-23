@@ -280,7 +280,8 @@ struct LoraRadio {
     bool            airImplicit;
     char            curIfacNetname[32];   /* IFAC network_name (s.) */
     char            curIfacNetkey[64];    /* IFAC passphrase (secrets.) */
-    uint8_t         curIfacSize;          /* IFAC access-code length */
+    bool            curIfacOn;            /* netname or passphrase set: frames are access-coded */
+    uint8_t         curIfacSize;          /* IFAC access-code length, resolved (never 0) */
     uint8_t         curAnnounceCap;       /* % bandwidth cap for announces (s.) */
     uint8_t         curPathAnswerSpread;  /* experiment: s.lora.<i>.path_answer_spread */
     uint8_t         curCommunityRadius;   /* serve nodes within this many hops on this radio; 0 = none */

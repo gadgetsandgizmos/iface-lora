@@ -105,7 +105,7 @@ static void loraTracePacket(LoraRadio* r, const char* dir,
 
     bool   ifac   = len >= 1 && (p[0] & 0x80);
     bool   hdr2   = len >= 1 && (p[0] & 0x40);
-    size_t ifacB  = ifac ? (r->curIfacSize ? r->curIfacSize : 1u) : 0;
+    size_t ifacB  = ifac ? r->curIfacSize : 0;
     size_t addrB  = hdr2 ? 32 : 16;                 /* [transport 16] + dest 16 */
     size_t hdrEnd = 2 + ifacB + addrB + 1;          /* through the context byte */
 

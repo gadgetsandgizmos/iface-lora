@@ -52,7 +52,10 @@ contributes:
   deafening the receiver.
 - **IFAC plumbing** — reading `s.lora.<n>.ifac_netname` / `ifac_size` and the
   `s.lora.<n>.ifac_netkey` secret and handing them to `rnsd` in the
-  `rnsd_iface_t` connect payload; `rnsd` does the actual access-code crypto.
+  `rnsd_iface_t` connect payload, an unset `ifac_size` as `RNS_IFAC_SIZE_SERIAL`
+  (8, upstream RNodeInterface's `DEFAULT_IFAC_SIZE`); `rnsd` does the actual
+  access-code crypto. A network name or passphrase is what switches IFAC on
+  (`curIfacOn`, which also gates SUPE); the size is only the code's length.
 - **LoRaMon** (§12) — a per-on-air-frame recorder whose storage subtree *is* the
   ring, plus the browser and LCD viewers that plot power, signal and protocol on
   a dBm axis with a click/touch zoom stack.
@@ -3046,7 +3049,7 @@ statics, globals or long-lived structs, never on a stack or in anything freed.
 
 | Key | Value |
 |---|---|
-| `lora.<n>.chans` | `"<freqHz>,<bwHz>\|…"`, index = channel, 0 = calling. One key, not a subtree: a handful of numbers that the viewers want all of at once to label their graphs. A list of **one** entry means no agile channel tracks, so a viewer tells the two cases apart by the entry count and needs no separate flag. **Two conditions put a channel track in the list**: the channel plan names the channel, *and* SUPE is running — a channel plan says which channels may be used, not that anything will use them, and only a channel switch ever leaves the calling channel. So it is republished on the runtime enable toggle as well as at config apply, those being the two things that can change the answer. The second condition is `r->supeOn`, the **effective state**, not `s.lora.<n>.SUPE.enable`, the setting: an access code (`ifac_size`), an expired protocol version or a failed `supeInit` each leave the switch on in the settings pane and SUPE off on the radio, and then this key holds the calling channel alone. A monitor drawing one graph where the operator set a nine-channel channel plan is that state, seen from the far end — `lora supe` names which of the three it is. |
+| `lora.<n>.chans` | `"<freqHz>,<bwHz>\|…"`, index = channel, 0 = calling. One key, not a subtree: a handful of numbers that the viewers want all of at once to label their graphs. A list of **one** entry means no agile channel tracks, so a viewer tells the two cases apart by the entry count and needs no separate flag. **Two conditions put a channel track in the list**: the channel plan names the channel, *and* SUPE is running — a channel plan says which channels may be used, not that anything will use them, and only a channel switch ever leaves the calling channel. So it is republished on the runtime enable toggle as well as at config apply, those being the two things that can change the answer. The second condition is `r->supeOn`, the **effective state**, not `s.lora.<n>.SUPE.enable`, the setting: an access code (`ifac_netname` or the passphrase), an expired protocol version or a failed `supeInit` each leave the switch on in the settings pane and SUPE off on the radio, and then this key holds the calling channel alone. A monitor drawing one graph where the operator set a nine-channel channel plan is that state, seen from the far end — `lora supe` names which of the three it is. |
 | `lora.<n>.rssi` | `"<ms>\|<ch0 dBm>\|<ch1 dBm>\|…"`, the newest sample set only. The device timestamp is in the **value**, not the key, so a viewer can tell a fresh reading from a repeated one and place it on the same clock the packet nodes use. A skipped tick republishes nothing, so the key is unchanged, no point is appended, and the gap reads as a gap. One key rather than a node per sample: the series is live-only, so there is no backlog to mirror and nothing to expire. |
 
 One field, the calling channel's: this radio samples nothing else (§18.5), and

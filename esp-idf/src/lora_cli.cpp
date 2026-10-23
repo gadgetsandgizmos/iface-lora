@@ -649,7 +649,7 @@ static void cliPrintNeighbors(int i, bool verbose) {
               "%u linked hashes evicted\n\n",
               nRows, NEI_MAX, (unsigned)st->evicted, (unsigned)st->goneSilent,
               (unsigned)st->hashEvicted);
-    if (r->curIfacSize)
+    if (r->curIfacOn)
         cliPrintf("  note: ifac enabled — frames are masked, passive parse sees nothing\n\n");
 
     CliPrintCtx ctx = { r, now, verbose, /*local=*/false };
@@ -776,7 +776,7 @@ static void cliSupe(int idx, const char* sub, const char* arg) {
     if (r->supeOn)
         supeState = "on";
     else if (storageGetInt(sk(kb, sizeof kb, idx, "SUPE.enable"), 0)) {
-        if (storageGetInt(sk(kb, sizeof kb, idx, "ifac_size"), 0))
+        if (r->curIfacOn)
             supeState = "off (an access code is configured)";
         else if (supeExpired(nowUnix))
             supeState = "off (the dialect this build speaks has expired)";
